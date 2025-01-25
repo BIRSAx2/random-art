@@ -27,6 +27,12 @@ impl Vec3 {
     pub fn length_squared(&self) -> f64 {
         self.e[0] * self.e[0] + self.e[1] * self.e[1] + self.e[2] * self.e[2]
     }
+
+    pub fn map(&self, f: impl Fn(f64) -> f64) -> Vec3 {
+        Vec3 {
+            e: [f(self.e[0]), f(self.e[1]), f(self.e[2])],
+        }
+    }
 }
 
 impl Add for Vec3 {

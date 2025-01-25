@@ -1,181 +1,181 @@
 use crate::operations::Operation;
 use rand::prelude::*;
-use thiserror::Error;
 
-#[derive(Error, Debug)]
-pub enum GrammarError {
-    #[error("No internal operations available in grammar")]
-    NoInternalOperations,
-
-    #[error("No leaf operations available in grammar")]
-    NoLeafOperations,
-
-    #[error("Could not choose a constant")]
-    ConstantSelectionError,
-
-    #[error("Error building expression tree")]
-    TreeBuildError,
+pub trait ArtGrammar {
+    fn generate_tree(&mut self, depth: usize) -> Operation;
 }
 
-pub struct Grammar {
-    internal_ops: Vec<fn(&mut Grammar) -> Result<Operation, GrammarError>>,
-    leaf_ops: Vec<fn(&mut Grammar) -> Result<Operation, GrammarError>>,
+pub struct RandomArtGrammar {
     rng: StdRng,
-    constants: Vec<f64>,
 }
 
-impl Grammar {
-    pub fn new(seed: u64) -> Result<Self, GrammarError> {
-        let mut rng = StdRng::seed_from_u64(seed);
+impl RandomArtGrammar {
+    pub fn new(seed: u64) -> Self {
+        RandomArtGrammar {
+            rng: StdRng::seed_from_u64(seed),
+        }
+    }
 
-        let num_constants = 10;
-        let constants: Vec<f64> = (0..num_constants).map(|_| rng.gen()).collect();
+    fn rand_leaf(&mut self) -> Operation {
+        let choices = [
+            Operation::VarX,
+            Operation::VarY,
+            Operation::VarT,
+            Operation::Constant(self.rng.gen_range(-1.0..=1.0)),
+            Operation::Circle(
+                self.rng.gen_range(-1.0..=1.0),
+                self.rng.gen_range(-1.0..=1.0),
+            ),
+        ];
+        choices.choose(&mut self.rng).unwrap().clone()
+    }
 
-        let internal_ops: Vec<fn(&mut Grammar) -> Result<Operation, GrammarError>> = vec![
-            |g: &mut Grammar| {
-                Ok(Operation::Sum(
-                    g.build_tree(0)?.into(),
-                    g.build_tree(0)?.into(),
-                ))
+    fn rand_internal_op(&mut self, depth: usize) -> Operation {
+        let choices = [
+            |g: &mut Self, depth| {
+                Operation::Sum(
+                    g.generate_tree(depth - 1).into(),
+                    g.generate_tree(depth - 1).into(),
+                )
             },
-            |g: &mut Grammar| {
-                Ok(Operation::PerChannelMask(
-                    g.build_tree(0)?.into(),
-                    g.build_tree(0)?.into(),
-                    g.build_tree(0)?.into(),
-                    g.get_constant()?,
-                ))
+            |g: &mut Self, depth| Operation::Sine(g.generate_tree(depth - 1).into()),
+            |g: &mut Self, depth| {
+                Operation::PerChannelMask(
+                    g.generate_tree(depth - 1).into(),
+                    g.generate_tree(depth - 1).into(),
+                    g.generate_tree(depth - 1).into(),
+                    g.rng.gen_range(-1.0..=1.0),
+                )
             },
-            |g: &mut Grammar| {
-                Ok(Operation::ColorMix(
-                    g.build_tree(0)?.into(),
-                    g.build_tree(0)?.into(),
-                    g.build_tree(0)?.into(),
-                ))
+            |g: &mut Self, depth| {
+                Operation::BinaryMask(
+                    g.generate_tree(depth - 1).into(),
+                    g.generate_tree(depth - 1).into(),
+                    g.generate_tree(depth - 1).into(),
+                    g.rng.gen_range(-1.0..=1.0),
+                )
             },
-            |g: &mut Grammar| {
-                Ok(Operation::BinaryMask(
-                    g.build_tree(0)?.into(),
-                    g.build_tree(0)?.into(),
-                    g.build_tree(0)?.into(),
-                    g.get_constant()?,
-                ))
+            |g: &mut Self, depth| {
+                Operation::SmoothMix(
+                    g.generate_tree(depth - 1).into(),
+                    g.generate_tree(depth - 1).into(),
+                    g.generate_tree(depth - 1).into(),
+                )
             },
-            |g: &mut Grammar| {
-                Ok(Operation::SmoothMix(
-                    g.build_tree(0)?.into(),
-                    g.build_tree(0)?.into(),
-                    g.build_tree(0)?.into(),
-                ))
+            |g: &mut Self, depth| Operation::Well(g.generate_tree(depth - 1).into()),
+            |g: &mut Self, depth| Operation::Tent(g.generate_tree(depth - 1).into()),
+            |g: &mut Self, depth| {
+                Operation::Product(
+                    g.generate_tree(depth - 1).into(),
+                    g.generate_tree(depth - 1).into(),
+                )
             },
-            |g: &mut Grammar| Ok(Operation::Well(g.build_tree(0)?.into())),
-            |g: &mut Grammar| Ok(Operation::Tent(g.build_tree(0)?.into())),
-            |g: &mut Grammar| {
-                Ok(Operation::Product(
-                    g.build_tree(0)?.into(),
-                    g.build_tree(0)?.into(),
-                ))
-            },
-            |g: &mut Grammar| Ok(Operation::Inverse(g.build_tree(0)?.into())),
-            |g: &mut Grammar| {
-                Ok(Operation::Mod(
-                    g.build_tree(0)?.into(),
-                    g.build_tree(0)?.into(),
-                ))
+            |g: &mut Self, depth| Operation::Inverse(g.generate_tree(depth - 1).into()),
+            |g: &mut Self, depth| {
+                Operation::Mod(
+                    g.generate_tree(depth - 1).into(),
+                    g.generate_tree(depth - 1).into(),
+                )
             },
         ];
 
-        if internal_ops.is_empty() {
-            return Err(GrammarError::NoInternalOperations);
-        }
-
-        let leaf_ops: Vec<fn(&mut Grammar) -> Result<Operation, GrammarError>> = vec![
-            |g: &mut Grammar| Ok(Operation::Constant(g.get_constant()?)),
-            |_g: &mut Grammar| Ok(Operation::VarX),
-            |_g: &mut Grammar| Ok(Operation::VarY),
-            |g: &mut Grammar| Ok(Operation::Circle(g.get_constant()?, g.get_constant()?)),
-        ];
-
-        if leaf_ops.is_empty() {
-            return Err(GrammarError::NoLeafOperations);
-        }
-
-        Ok(Grammar {
-            internal_ops,
-            leaf_ops,
-            rng,
-            constants,
-        })
+        let op_fn = choices.choose(&mut self.rng).unwrap();
+        op_fn(self, depth)
     }
+}
 
-    fn rand_op(&mut self) -> Result<Operation, GrammarError> {
-        self.internal_ops
-            .choose_mut(&mut self.rng)
-            .copied()
-            .map(|op_fn| op_fn(self))
-            .ok_or(GrammarError::NoInternalOperations)?
-    }
-
-    fn rand_leaf(&mut self) -> Result<Operation, GrammarError> {
-        self.leaf_ops
-            .choose_mut(&mut self.rng)
-            .copied()
-            .map(|op_fn| op_fn(self))
-            .ok_or(GrammarError::NoLeafOperations)?
-    }
-
-    pub fn get_constant(&mut self) -> Result<f64, GrammarError> {
-        self.constants
-            .choose(&mut self.rng)
-            .copied()
-            .ok_or(GrammarError::ConstantSelectionError)
-    }
-
-    pub fn build_tree(&mut self, depth: usize) -> Result<Operation, GrammarError> {
+impl ArtGrammar for RandomArtGrammar {
+    fn generate_tree(&mut self, depth: usize) -> Operation {
         if depth == 0 {
             self.rand_leaf()
         } else {
-            let mut op = self.rand_op()?;
-            match &mut op {
-                Operation::Sum(a, b) => {
-                    **a = self.build_tree(depth - 1)?;
-                    **b = self.build_tree(depth - 1)?;
-                }
-                Operation::Product(a, b) => {
-                    **a = self.build_tree(depth - 1)?;
-                    **b = self.build_tree(depth - 1)?;
-                }
-                Operation::Mod(a, b) => {
-                    **a = self.build_tree(depth - 1)?;
-                    **b = self.build_tree(depth - 1)?;
-                }
-                Operation::Inverse(a) => **a = self.build_tree(depth - 1)?,
-                Operation::PerChannelMask(m, a, b, _) => {
-                    **m = self.build_tree(depth - 1)?;
-                    **a = self.build_tree(depth - 1)?;
-                    **b = self.build_tree(depth - 1)?;
-                }
-                Operation::ColorMix(r, g, b) => {
-                    **r = self.build_tree(depth - 1)?;
-                    **g = self.build_tree(depth - 1)?;
-                    **b = self.build_tree(depth - 1)?;
-                }
-                Operation::BinaryMask(m, a, b, _) => {
-                    **m = self.build_tree(depth - 1)?;
-                    **a = self.build_tree(depth - 1)?;
-                    **b = self.build_tree(depth - 1)?;
-                }
-                Operation::SmoothMix(w, a, b) => {
-                    **w = self.build_tree(depth - 1)?;
-                    **a = self.build_tree(depth - 1)?;
-                    **b = self.build_tree(depth - 1)?;
-                }
-                Operation::Well(a) => **a = self.build_tree(depth - 1)?,
-                Operation::Tent(a) => **a = self.build_tree(depth - 1)?,
-                _ => {}
-            }
-
-            Ok(op)
+            self.rand_internal_op(depth)
         }
+    }
+}
+
+// Structure to represent a choice with its probability
+struct WeightedChoice<T> {
+    choice: T,
+    weight: f64,
+}
+
+impl<T> WeightedChoice<T> {
+    fn new(choice: T, weight: f64) -> Self {
+        WeightedChoice { choice, weight }
+    }
+}
+
+fn weighted_random_choice<'a, T>(rng: &mut StdRng, choices: &'a [WeightedChoice<T>]) -> &'a T {
+    let total_weight: f64 = choices.iter().map(|c| c.weight).sum();
+    let mut random_weight = rng.gen_range(0.0..total_weight);
+
+    for choice in choices {
+        if random_weight < choice.weight {
+            return &choice.choice;
+        }
+        random_weight -= choice.weight;
+    }
+
+    &choices.last().unwrap().choice
+}
+
+// Source: https://users.ece.cmu.edu/~adrian/projects/validation/validation.pdf
+pub struct PerrigSongGrammar {
+    rng: StdRng,
+}
+
+impl PerrigSongGrammar {
+    pub fn new(seed: u64) -> Self {
+        PerrigSongGrammar {
+            rng: StdRng::seed_from_u64(seed),
+        }
+    }
+
+    fn generate_a(&mut self) -> Operation {
+        let choices = [
+            WeightedChoice::new(Operation::Constant(self.rng.gen_range(-1.0..=1.0)), 1.0),
+            WeightedChoice::new(Operation::VarX, 1.0),
+            WeightedChoice::new(Operation::VarY, 1.0),
+            WeightedChoice::new(Operation::VarT, 1.0),
+        ];
+
+        weighted_random_choice(&mut self.rng, &choices).clone()
+    }
+
+    fn generate_c(&mut self, depth: usize) -> Operation {
+        if depth == 0 {
+            return self.generate_a();
+        }
+
+        let choices = [
+            WeightedChoice::new(self.generate_a(), 1.0),
+            WeightedChoice::new(
+                Operation::Sum(
+                    self.generate_c(depth - 1).into(),
+                    self.generate_c(depth - 1).into(),
+                ),
+                2.0,
+            ),
+            WeightedChoice::new(
+                Operation::Product(
+                    self.generate_c(depth - 1).into(),
+                    self.generate_c(depth - 1).into(),
+                ),
+                2.0,
+            ),
+        ];
+
+        weighted_random_choice(&mut self.rng, &choices).clone()
+    }
+}
+
+impl ArtGrammar for PerrigSongGrammar {
+    fn generate_tree(&mut self, depth: usize) -> Operation {
+        Operation::RGB(
+            self.generate_c(depth).into(),
+            self.generate_c(depth).into(),
+            self.generate_c(depth).into(),
+        )
     }
 }
